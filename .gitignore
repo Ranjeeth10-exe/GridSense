@@ -1,0 +1,7 @@
+household_power_consumption.txt
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.conda/
+anaconda_projects/
+db/

@@ -1,0 +1,33 @@
+# 🔌 GridSense — Electricity Anomaly Detection
+
+Detects electricity theft, equipment faults and power 
+surges from smart meter data using Machine Learning.
+
+## 🧠 Models Used
+- Simple Linear Regression
+- Multiple Linear Regression
+- Decision Tree
+- SVM (Support Vector Machine)
+- Random Forest
+
+## 🛠️ Tech Stack
+Python, scikit-learn, pandas, matplotlib, streamlit
+
+## ▶️ How to Run
+
+### Install dependencies
+pip install -r requirements.txt
+
+### Run dashboard
+streamlit run dashboard.py
+
+## 📊 Dataset
+UCI Individual Household Electric Power Consumption
+https://archive.ics.uci.edu/dataset/235/individual+household+electric+power+consumption
+
+## 📁 Project Structure
+GridSense/
+├── dashboard.py        ← Streamlit web app
+├── gridsense.ipynb     ← Jupyter notebook (all models)
+├── requirements.txt    ← dependencies
+└── README.md           ← project description
