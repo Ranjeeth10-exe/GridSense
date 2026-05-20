@@ -23,20 +23,39 @@ st.markdown("---")
 DATA_URL = "https://archive.ics.uci.edu/static/public/235/individual+household+electric+power+consumption.zip"
 DATA_FILE = "household_power_consumption.txt"
 
+# Streamlit Cloud has limited RAM. Do not load the full 2M+ rows.
+MAX_ROWS = 80_000
+TRAIN_PER_CLASS = 6_000
+
 
 # ============================================================
 # LOAD DATA + TRAIN MODEL
 # ============================================================
-@st.cache_data(show_spinner=False)
-def load_and_train():
+@st.cache_resource(show_spinner=False)
+def load_and_train(max_rows: int = MAX_ROWS):
     """
-    Main fix:
-    Do NOT use parse_dates={'DateTime': ['Date', 'Time']}.
-    New pandas versions used in Streamlit Cloud can throw:
-    TypeError: Only booleans and lists are accepted for the 'parse_dates' parameter
+    Optimized for Streamlit Cloud.
 
-    So we read Date and Time normally, then manually create DateTime.
+    Fixes included:
+    1. Does not use deprecated/unsupported parse_dates dictionary format.
+    2. Loads only a limited number of rows to avoid Streamlit memory crash.
+    3. Uses only required columns.
+    4. Uses vectorized anomaly labeling instead of slow df.apply().
+    5. Uses a smaller Random Forest with n_jobs=1 to reduce memory usage.
+    6. Uses st.cache_resource instead of st.cache_data to avoid heavy serialization.
     """
+
+    usecols = [
+        "Date",
+        "Time",
+        "Global_active_power",
+        "Global_reactive_power",
+        "Voltage",
+        "Global_intensity",
+        "Sub_metering_1",
+        "Sub_metering_2",
+        "Sub_metering_3",
+    ]
 
     response = requests.get(DATA_URL, timeout=120)
     response.raise_for_status()
@@ -46,18 +65,19 @@ def load_and_train():
             df = pd.read_csv(
                 f,
                 sep=";",
+                usecols=usecols,
+                nrows=max_rows,
                 na_values=["?"],
                 low_memory=False,
             )
 
-    # Create DateTime manually - compatible with new pandas versions
+    # Create DateTime manually. This avoids the Streamlit pandas parse_dates error.
     df["DateTime"] = pd.to_datetime(
         df["Date"].astype(str) + " " + df["Time"].astype(str),
         dayfirst=True,
         errors="coerce",
     )
 
-    # Convert numeric columns safely
     numeric_cols = [
         "Global_active_power",
         "Global_reactive_power",
@@ -71,17 +91,16 @@ def load_and_train():
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Remove invalid DateTime rows, then fill missing numeric values
     df = df.dropna(subset=["DateTime"]).copy()
     df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].mean())
 
     # Feature engineering
-    df["Hour"] = df["DateTime"].dt.hour
-    df["Month"] = df["DateTime"].dt.month
-    df["Weekday"] = df["DateTime"].dt.weekday
+    df["Hour"] = df["DateTime"].dt.hour.astype("int8")
+    df["Month"] = df["DateTime"].dt.month.astype("int8")
+    df["Weekday"] = df["DateTime"].dt.weekday.astype("int8")
     df["Date_Only"] = df["DateTime"].dt.date
 
-    # MLR - Expected power
+    # Linear Regression for expected power
     features_mlr = [
         "Voltage",
         "Global_intensity",
@@ -96,19 +115,16 @@ def load_and_train():
     df["Expected_Power"] = mlr.predict(df[features_mlr])
     df["Deviation"] = df["Global_active_power"] - df["Expected_Power"]
 
-    # Anomaly labels
-    def label_anomaly(row):
-        if row["Deviation"] < -0.3 and row["Global_reactive_power"] < 0.1:
-            return "Theft"
-        if row["Voltage"] < 220 or row["Voltage"] > 245:
-            return "Fault"
-        if row["Deviation"] > 0.1:
-            return "Surge"
-        return "Normal"
+    # Fast vectorized labeling instead of df.apply()
+    conditions = [
+        (df["Deviation"] < -0.3) & (df["Global_reactive_power"] < 0.1),
+        (df["Voltage"] < 220) | (df["Voltage"] > 245),
+        df["Deviation"] > 0.1,
+    ]
 
-    df["Anomaly_Label"] = df.apply(label_anomaly, axis=1)
+    choices = ["Theft", "Fault", "Surge"]
+    df["Anomaly_Label"] = np.select(conditions, choices, default="Normal")
 
-    # Random Forest features
     features_rf = [
         "Global_active_power",
         "Global_reactive_power",
@@ -120,21 +136,27 @@ def load_and_train():
         "Weekday",
     ]
 
-    # Training on the full 2M+ rows can be slow on Streamlit Cloud.
-    # Use a balanced practical sample for faster deployment.
+    # Balanced lightweight training set
     train_parts = []
     for label in ["Normal", "Theft", "Fault", "Surge"]:
         part = df[df["Anomaly_Label"] == label]
-        if len(part) > 0:
-            train_parts.append(part.sample(n=min(15000, len(part)), random_state=42))
+        if not part.empty:
+            train_parts.append(
+                part.sample(n=min(TRAIN_PER_CLASS, len(part)), random_state=42)
+            )
 
-    train_df = pd.concat(train_parts, ignore_index=True).sample(frac=1, random_state=42)
+    if not train_parts:
+        raise ValueError("No training data available after preprocessing.")
+
+    train_df = pd.concat(train_parts, ignore_index=True)
+    train_df = train_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     rf = RandomForestClassifier(
-        n_estimators=80,
-        max_depth=12,
+        n_estimators=25,
+        max_depth=8,
+        min_samples_leaf=3,
         random_state=42,
-        n_jobs=-1,
+        n_jobs=1,
         class_weight="balanced",
     )
     rf.fit(train_df[features_rf], train_df["Anomaly_Label"])
@@ -142,15 +164,20 @@ def load_and_train():
     return df, mlr, rf, features_mlr, features_rf
 
 
-with st.spinner("Loading dataset and training models... ⏳ First load may take 1-2 minutes."):
+with st.spinner("Loading optimized dataset and training models... ⏳"):
     try:
-        df, mlr, rf, features_mlr, features_rf = load_and_train()
+        df, mlr, rf, features_mlr, features_rf = load_and_train(MAX_ROWS)
     except Exception as e:
         st.error("❌ App failed while loading data or training the model.")
         st.exception(e)
         st.stop()
 
-st.success(f"✅ Dataset loaded — {len(df):,} rows | Models trained successfully!")
+st.success(
+    f"✅ App running in low-memory mode — {len(df):,} rows loaded | Models trained successfully!"
+)
+st.caption(
+    "Note: This Streamlit Cloud version uses a sample of the dataset to avoid memory-limit errors."
+)
 
 
 # ============================================================
@@ -160,6 +187,7 @@ st.markdown("---")
 st.subheader("📊 Overview")
 
 counts = df["Anomaly_Label"].value_counts()
+
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("✅ Normal", f"{counts.get('Normal', 0):,}")
 col2.metric("🚨 Theft", f"{counts.get('Theft', 0):,}")
@@ -173,9 +201,10 @@ col4.metric("📈 Surge", f"{counts.get('Surge', 0):,}")
 st.markdown("---")
 st.subheader("📈 Daily Power Consumption")
 
-daily_avg = df.groupby("Date_Only")["Global_active_power"].mean()
+daily_avg = df.groupby("Date_Only", observed=True)["Global_active_power"].mean()
+
 fig1, ax1 = plt.subplots(figsize=(14, 4))
-ax1.plot(daily_avg.index, daily_avg.values, linewidth=0.8)
+ax1.plot(daily_avg.index, daily_avg.values, linewidth=0.9)
 ax1.set_xlabel("Date")
 ax1.set_ylabel("Power (kW)")
 ax1.set_title("Daily Average Power Consumption")
@@ -193,7 +222,8 @@ st.subheader("🕐 Consumption Patterns")
 col_a, col_b = st.columns(2)
 
 with col_a:
-    hourly_avg = df.groupby("Hour")["Global_active_power"].mean()
+    hourly_avg = df.groupby("Hour", observed=True)["Global_active_power"].mean()
+
     fig2, ax2 = plt.subplots(figsize=(7, 4))
     ax2.bar(hourly_avg.index, hourly_avg.values)
     ax2.set_title("Average by Hour of Day")
@@ -205,7 +235,8 @@ with col_a:
     plt.close(fig2)
 
 with col_b:
-    monthly_avg = df.groupby("Month")["Global_active_power"].mean()
+    monthly_avg = df.groupby("Month", observed=True)["Global_active_power"].mean()
+
     fig3, ax3 = plt.subplots(figsize=(7, 4))
     ax3.bar(monthly_avg.index, monthly_avg.values)
     ax3.set_title("Average by Month")
@@ -229,24 +260,23 @@ st.subheader("🚨 Detected Anomalies")
 anomaly_type = st.selectbox("Filter by type:", ["All", "Theft", "Fault", "Surge"])
 
 if anomaly_type == "All":
-    anomalies = df[df["Anomaly_Label"] != "Normal"]
+    anomalies = df.loc[df["Anomaly_Label"] != "Normal"]
 else:
-    anomalies = df[df["Anomaly_Label"] == anomaly_type]
+    anomalies = df.loc[df["Anomaly_Label"] == anomaly_type]
 
-st.write(f"Showing {len(anomalies):,} anomalies")
+st.write(f"Found {len(anomalies):,} anomalies. Displaying first 50 rows only.")
+
+display_cols = [
+    "DateTime",
+    "Global_active_power",
+    "Voltage",
+    "Global_reactive_power",
+    "Deviation",
+    "Anomaly_Label",
+]
+
 st.dataframe(
-    anomalies[
-        [
-            "DateTime",
-            "Global_active_power",
-            "Voltage",
-            "Global_reactive_power",
-            "Deviation",
-            "Anomaly_Label",
-        ]
-    ]
-    .head(50)
-    .reset_index(drop=True),
+    anomalies[display_cols].head(50).reset_index(drop=True),
     use_container_width=True,
 )
 
@@ -259,15 +289,64 @@ st.subheader("🔍 Live Anomaly Predictor")
 st.markdown("Enter meter readings and get instant prediction.")
 
 c1, c2, c3, c4 = st.columns(4)
-inp_power = c1.number_input("Active Power (kW)", min_value=0.0, max_value=10.0, value=1.5)
-inp_reactive = c2.number_input("Reactive Power (kW)", min_value=0.0, max_value=2.0, value=0.2)
-inp_voltage = c3.number_input("Voltage (V)", min_value=200.0, max_value=260.0, value=235.0)
-inp_intensity = c4.number_input("Intensity (A)", min_value=0.0, max_value=50.0, value=7.0)
+
+inp_power = c1.number_input(
+    "Active Power (kW)",
+    min_value=0.0,
+    max_value=10.0,
+    value=1.5,
+    step=0.1,
+)
+
+inp_reactive = c2.number_input(
+    "Reactive Power (kW)",
+    min_value=0.0,
+    max_value=2.0,
+    value=0.2,
+    step=0.01,
+)
+
+inp_voltage = c3.number_input(
+    "Voltage (V)",
+    min_value=200.0,
+    max_value=260.0,
+    value=235.0,
+    step=0.5,
+)
+
+inp_intensity = c4.number_input(
+    "Intensity (A)",
+    min_value=0.0,
+    max_value=50.0,
+    value=7.0,
+    step=0.1,
+)
 
 c5, c6, c7 = st.columns(3)
-inp_sub1 = c5.number_input("Sub Meter 1 (Wh)", min_value=0.0, max_value=100.0, value=0.0)
-inp_sub2 = c6.number_input("Sub Meter 2 (Wh)", min_value=0.0, max_value=100.0, value=0.0)
-inp_sub3 = c7.number_input("Sub Meter 3 (Wh)", min_value=0.0, max_value=100.0, value=17.0)
+
+inp_sub1 = c5.number_input(
+    "Sub Meter 1 (Wh)",
+    min_value=0.0,
+    max_value=100.0,
+    value=0.0,
+    step=1.0,
+)
+
+inp_sub2 = c6.number_input(
+    "Sub Meter 2 (Wh)",
+    min_value=0.0,
+    max_value=100.0,
+    value=0.0,
+    step=1.0,
+)
+
+inp_sub3 = c7.number_input(
+    "Sub Meter 3 (Wh)",
+    min_value=0.0,
+    max_value=100.0,
+    value=17.0,
+    step=1.0,
+)
 
 if st.button("🔍 Predict", use_container_width=True):
     mlr_input = pd.DataFrame(
@@ -286,6 +365,7 @@ if st.button("🔍 Predict", use_container_width=True):
     deviation = inp_power - expected
 
     now = pd.Timestamp.now()
+
     input_data = pd.DataFrame(
         [
             {
@@ -322,15 +402,19 @@ if st.button("🔍 Predict", use_container_width=True):
 st.markdown("---")
 st.subheader("💸 Next Month Bill Prediction")
 
-recent_df = df.sort_values("DateTime").tail(60 * 24 * 30 * 3)  # approx last 3 months of minute data
-last_3_avg = recent_df["Global_active_power"].mean()
-units = last_3_avg * 24 * 30
-bill = units * 6.5
+# With sampled rows, estimate using the most recent available rows.
+recent_df = df.sort_values("DateTime").tail(min(len(df), 20_000))
+
+last_avg_power = recent_df["Global_active_power"].mean()
+estimated_units = last_avg_power * 24 * 30
+estimated_bill = estimated_units * 6.5
 
 col_b1, col_b2, col_b3 = st.columns(3)
-col_b1.metric("Avg Power", f"{last_3_avg:.3f} kW")
-col_b2.metric("Estimated Units", f"{units:.0f} kWh")
-col_b3.metric("Predicted Bill", f"₹{bill:,.0f}")
+
+col_b1.metric("Avg Power", f"{last_avg_power:.3f} kW")
+col_b2.metric("Estimated Units", f"{estimated_units:.0f} kWh")
+col_b3.metric("Predicted Bill", f"₹{estimated_bill:,.0f}")
+
 st.caption("Estimated using ₹6.5/unit")
 
 
