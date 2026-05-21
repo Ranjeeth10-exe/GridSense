@@ -1174,20 +1174,20 @@
       <section class="container">
         <div class="section-head reveal">
           <h2>Next month bill prediction</h2>
-          <p>Estimated using recent average power × 24hr × 30 days at TANGEDCO ₹6.5/unit rate.</p>
+          <p>Estimated using the current active power reading × 24hr × 30 days at TANGEDCO ₹6.5/unit rate.</p>
         </div>
         <div class="bill-band">
           <div class="bill-card reveal d1">
-            <small>Avg Power (recent)</small>
-            <strong>1.422 kW</strong>
+            <small>Current Power</small>
+            <strong id="bill_power">1.422 kW</strong>
           </div>
           <div class="bill-card reveal d2">
             <small>Estimated Units</small>
-            <strong>1,024 kWh</strong>
+            <strong id="bill_units">1,024 kWh</strong>
           </div>
           <div class="bill-card reveal d3">
             <small>Predicted Bill</small>
-            <strong>₹6,656</strong>
+            <strong id="bill_amount">₹6,656</strong>
           </div>
         </div>
       </section>
@@ -1226,6 +1226,7 @@
                      + 0.0025 * sub3    - 0.42;
 
       const deviation = power - expected;
+      updateBillEstimator(power);
 
       // Rule-based classification matching actual thresholds in dashboard.py
       let label, conf, statusText, title, text, color;
@@ -1288,6 +1289,25 @@
       }, 180);
     }
 
+
+    function formatNumber(value, digits=0) {
+      return value.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
+
+    function updateBillEstimator(power) {
+      const units = power * 24 * 30;
+      const bill = units * 6.5;
+      document.getElementById('bill_power').textContent = formatNumber(power, 3) + ' kW';
+      document.getElementById('bill_units').textContent = formatNumber(units, 0) + ' kWh';
+      document.getElementById('bill_amount').textContent = '₹' + formatNumber(bill, 0);
+    }
+
+    document.getElementById('f_power').addEventListener('input', () => {
+      const power = parseFloat(document.getElementById('f_power').value) || 1.5;
+      updateBillEstimator(power);
+    });
+
+    updateBillEstimator(parseFloat(document.getElementById('f_power').value) || 1.5);
 
     // NAV scroll — force works in all browsers
     function navTo(e, id) {
