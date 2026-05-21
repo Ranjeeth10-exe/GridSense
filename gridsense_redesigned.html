@@ -904,10 +904,10 @@
         </div>
         <nav>
           <ul>
-            <li><a href="#features">Features</a></li>
-            <li><a href="#models">Models</a></li>
-            <li><a href="#predictor">Predictor</a></li>
-            <li><a href="#workflow">Workflow</a></li>
+            <li><a href="#features" onclick="navTo(event,'features')">Features</a></li>
+            <li><a href="#models" onclick="navTo(event,'models')">Models</a></li>
+            <li><a href="#predictor" onclick="navTo(event,'predictor')">Predictor</a></li>
+            <li><a href="#workflow" onclick="navTo(event,'workflow')">Workflow</a></li>
           </ul>
         </nav>
         <a class="btn" href="#predictor" onclick="launchDemo(event)">Launch Demo</a>
@@ -1286,6 +1286,17 @@
           el.style.transform = 'translateY(0)';
         });
       }, 180);
+    }
+
+
+    // NAV scroll — force works in all browsers
+    function navTo(e, id) {
+      e.preventDefault();
+      const el = document.getElementById(id);
+      if (!el) return;
+      const offset = 80; // sticky header height
+      const top = el.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top, behavior: 'smooth' });
     }
 
     // ── BUTTON ACTIONS ──
