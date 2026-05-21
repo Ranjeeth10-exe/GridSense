@@ -13,6 +13,24 @@ st.markdown(
 page_html = Path(__file__).with_name("gridsense_redesigned.html").read_text(encoding="utf-8")
 components.html(page_html, height=5200, scrolling=True)
 
+with st.spinner("Loading optimized dataset and training models... ⏳ (first load takes ~2 mins)"):
+    try:
+        df, mlr, rf, features_mlr, features_rf = load_and_train(MAX_ROWS)
+        st.success(
+            f"✅ App running in low-memory mode — {len(df):,} rows loaded | Models trained successfully!"
+        )
+        st.caption(
+            "Note: This Streamlit Cloud version uses a sample of the dataset to avoid memory-limit errors."
+        )
+    except Exception as e:
+        st.error("❌ App failed while loading data or training the model.")
+        st.exception(e)
+        st.stop()
+
+# SECTION 1 - OVERVIEW
+st.markdown("---")
+st.subheader("📊 Overview")
+
 counts = df["Anomaly_Label"].value_counts()
 
 col1, col2, col3, col4 = st.columns(4)
