@@ -1,11 +1,13 @@
 import io
 import zipfile
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
 
@@ -13,12 +15,6 @@ from sklearn.linear_model import LinearRegression
 # PAGE CONFIG
 # ============================================================
 st.set_page_config(page_title="GridSense", page_icon="🔌", layout="wide")
-
-st.title("🔌 GridSense — Electricity Anomaly Detection")
-st.markdown(
-    "Detects **theft**, **faults**, and **surges** from smart meter data using Machine Learning."
-)
-st.markdown("---")
 
 DATA_URL = "https://archive.ics.uci.edu/static/public/235/individual+household+electric+power+consumption.zip"
 DATA_FILE = "household_power_consumption.txt"
@@ -178,6 +174,9 @@ st.success(
 st.caption(
     "Note: This Streamlit Cloud version uses a sample of the dataset to avoid memory-limit errors."
 )
+
+page_html = Path(__file__).with_name("gridsense_redesigned.html").read_text(encoding="utf-8")
+components.html(page_html, height=3400, scrolling=True)
 
 
 # ============================================================
