@@ -862,6 +862,33 @@
       .bill-band, .models-grid { grid-template-columns: 1fr; }
       .cta-band { padding: 28px 22px; }
     }
+
+    /* TOAST */
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--bg-3);
+      border: 1px solid var(--border-s);
+      border-radius: 14px;
+      padding: 14px 24px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--text);
+      z-index: 999;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: transform 0.4s cubic-bezier(0.22,1,0.36,1), opacity 0.4s;
+      opacity: 0;
+      white-space: nowrap;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    .step.hl { border-color: var(--amber) !important; background: rgba(245,166,35,0.07) !important; transition: border-color 0.3s, background 0.3s; }
+    .panel.pulse { box-shadow: 0 0 0 3px rgba(245,166,35,0.35), var(--shadow); transition: box-shadow 0.3s; }
+
   </style>
 </head>
 <body>
@@ -883,7 +910,7 @@
             <li><a href="#workflow">Workflow</a></li>
           </ul>
         </nav>
-        <a class="btn" href="#predictor">Launch Demo</a>
+        <a class="btn" href="#predictor" onclick="launchDemo(event)">Launch Demo</a>
       </div>
     </header>
 
@@ -898,8 +925,8 @@
             to classify smart meter anomalies with 100% accuracy and 99%+ confidence on live readings.
           </p>
           <div class="hero-btns">
-            <a class="btn" href="#predictor">Try Predictor</a>
-            <a class="btn btn-ghost" href="#workflow">View Pipeline</a>
+            <a class="btn" href="#predictor" onclick="tryPredictor(event)">Try Predictor</a>
+            <a class="btn btn-ghost" href="#workflow" onclick="viewPipeline(event)">View Pipeline</a>
           </div>
           <div class="accuracy-badge">✅ Random Forest · 100% accuracy · Voltage = 89.25% importance</div>
         </div>
@@ -1172,7 +1199,7 @@
             <h2>Deploy on Streamlit Cloud</h2>
             <p>5 ML models, live predictor, anomaly detection, and bill estimation — all running on Streamlit Cloud with zero hardware required.</p>
           </div>
-          <a class="btn" href="#predictor">Try UI Demo</a>
+          <a class="btn" href="#predictor" onclick="tryUiDemo(event)">Try UI Demo</a>
         </div>
       </section>
     </main>
@@ -1260,6 +1287,112 @@
         });
       }, 180);
     }
+
+    // ── BUTTON ACTIONS ──
+
+    // Show toast helper
+    function showToast(icon, msg, duration=3000) {
+      let t = document.getElementById('gs-toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'gs-toast';
+        t.className = 'toast';
+        document.body.appendChild(t);
+      }
+      t.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+      t.classList.add('show');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => t.classList.remove('show'), duration);
+    }
+
+    // 1. LAUNCH DEMO (nav button)
+    // Scrolls to predictor + shows toast with Streamlit link hint
+    function launchDemo(e) {
+      e.preventDefault();
+      showToast('🚀', 'Opening predictor — connect to your Streamlit URL to go live!', 3500);
+      setTimeout(() => {
+        document.getElementById('predictor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setTimeout(() => {
+          const panel = document.querySelector('.panel');
+          if (panel) {
+            panel.classList.add('pulse');
+            setTimeout(() => panel.classList.remove('pulse'), 1200);
+          }
+          document.getElementById('f_power').focus();
+        }, 600);
+      }, 300);
+    }
+
+    // 2. TRY PREDICTOR (hero button)
+    // Scrolls to predictor + focuses first input + highlights form
+    function tryPredictor(e) {
+      e.preventDefault();
+      document.getElementById('predictor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        const panel = document.querySelector('.panel');
+        if (panel) {
+          panel.classList.add('pulse');
+          setTimeout(() => panel.classList.remove('pulse'), 1200);
+        }
+        document.getElementById('f_power').focus();
+        showToast('🔍', 'Enter your meter values and click Run Prediction →');
+      }, 700);
+    }
+
+    // 3. VIEW PIPELINE (hero ghost button)
+    // Scrolls to workflow + highlights each step one by one
+    function viewPipeline(e) {
+      e.preventDefault();
+      document.getElementById('workflow').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        const steps = document.querySelectorAll('.step');
+        const labels = ['SLR + Trend', 'MLR Baseline', 'Decision Tree', 'SVM Theft Check', 'Random Forest'];
+        steps.forEach((s, i) => {
+          setTimeout(() => {
+            steps.forEach(x => x.classList.remove('hl'));
+            s.classList.add('hl');
+            showToast(['📈','🎯','🌿','⚔️','🌳'][i], `Step ${i+1}: ${labels[i]}`, 900);
+            if (i === steps.length - 1) {
+              setTimeout(() => s.classList.remove('hl'), 900);
+            }
+          }, i * 950);
+        });
+      }, 700);
+    }
+
+    // 4. TRY UI DEMO (CTA button)
+    // Pre-fills a THEFT scenario + auto-runs prediction
+    function tryUiDemo(e) {
+      e.preventDefault();
+      showToast('🚨', 'Loading theft scenario — watch the predictor!', 2500);
+      setTimeout(() => {
+        document.getElementById('predictor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setTimeout(() => {
+          // Theft scenario: low power + very low reactive + normal voltage
+          document.getElementById('f_power').value    = '0.80';
+          document.getElementById('f_reactive').value = '0.04';
+          document.getElementById('f_voltage').value  = '234.0';
+          document.getElementById('f_intensity').value= '7.2';
+          document.getElementById('f_sub1').value     = '0';
+          document.getElementById('f_sub2').value     = '0';
+          document.getElementById('f_sub3').value     = '17';
+
+          // Flash each input
+          ['f_power','f_reactive','f_voltage','f_intensity','f_sub1','f_sub2','f_sub3'].forEach((id, i) => {
+            setTimeout(() => {
+              const el = document.getElementById(id);
+              el.style.borderColor = 'var(--amber)';
+              el.style.boxShadow   = '0 0 0 3px rgba(245,166,35,0.2)';
+              setTimeout(() => { el.style.borderColor = ''; el.style.boxShadow = ''; }, 500);
+            }, i * 80);
+          });
+
+          // Auto-run prediction after inputs flash
+          setTimeout(() => runPrediction(), 700);
+        }, 800);
+      }, 400);
+    }
+
   </script>
 </body>
 </html>
